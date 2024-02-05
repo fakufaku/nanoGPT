@@ -1,13 +1,17 @@
 """
 Sample from a trained model
 """
+import math
 import os
+import json
 import pickle
+import numpy as np
 from contextlib import nullcontext
 import torch
+import torch.nn.functional as F
 import tiktoken
+from tqdm import tqdm
 from model import GPTConfig, GPT
-import tqdm
 
 # -----------------------------------------------------------------------------
 init_from = (
@@ -15,16 +19,10 @@ init_from = (
 )
 out_dir = "out"  # ignored if init_from is not 'resume'
 start = "\n"  # or "<|endoftext|>" or etc. Can also specify a file, use as: "FILE:prompt.txt"
-num_samples = 10  # number of samples to draw
-max_new_tokens = 500  # number of tokens generated in each sample
-temperature = (
-    0.8  # 1.0 = no change, < 1.0 = less random, > 1.0 = more random, in predictions
-)
-top_k = (
-    200  # retain only the top_k most likely tokens, clamp others to have 0 probability
-)
 seed = 1337
 device = "cuda"  # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1', etc.
+batch_size = 12
+max_batches = -1
 dtype = (
     "bfloat16"
     if torch.cuda.is_available() and torch.cuda.is_bf16_supported()
@@ -67,6 +65,46 @@ elif init_from.startswith("gpt2"):
     # init from a given GPT-2 model
     model = GPT.from_pretrained(init_from, dict(dropout=0.0))
 
+# poor man's data loader
+dataset = checkpoint["config"]["dataset"]
+data_dir = os.path.join("data", dataset)
+test_data = np.memmap(os.path.join(data_dir, "test.bin"), dtype=np.uint16, mode="r")
+block_size = checkpoint["config"]["block_size"]
+data = test_data
+num_batches = math.ceil((len(data) - block_size - 1) / batch_size)
+if max_batches > 0:
+    num_batches = min(num_batches, max_batches)
+
+
+def get_batch():
+    batch_idx = 0
+    for i in tqdm(range(0, len(data) - block_size - 1, batch_size), total=num_batches):
+        if max_batches > 0 and batch_idx >= max_batches:
+            break
+        s = i
+        e = min
+        seq = data[i : i + block_size + batch_size + 1].astype(np.int64)
+        x = np.lib.stride_tricks.as_strided(
+            seq[: block_size + batch_size],
+            shape=(batch_size, block_size),
+            strides=(seq.strides[0], seq.strides[0]),
+        )
+        y = seq[block_size : block_size + batch_size]
+        # pass to torch
+        x = torch.from_numpy(x).contiguous()
+        y = torch.from_numpy(y).contiguous()
+        # single character prediction at test time ?
+        if device_type == "cuda":
+            # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
+            x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(
+                device, non_blocking=True
+            )
+        else:
+            x, y = x.to(device), y.to(device)
+        yield x, y
+        batch_idx += 1
+
+
 model.eval()
 model.to(device)
 if compile:
@@ -87,24 +125,8 @@ if load_meta:
         meta = pickle.load(f)
     # TODO want to make this more general to arbitrary encoder/decoder schemes
     stoi, itos = meta["stoi"], meta["itos"]
-    if checkpoint["config"]["dataset"] == "enwik8":
-        # enwik8 was encoded with a simple character encoding
-        def encode(s):
-            if isinstance(s, str):
-                s = s.encode("utf-8")
-            return [
-                stoi[c] for c in s
-            ]  # encoder: take a string, output a list of integers
-
-        def decode(l):
-            b_array = b"".join([itos[i].to_bytes(1, "big") for i in l])
-            return b_array.decode(
-                "utf-8"
-            )  # decoder: take a list of integers, output a string
-
-    else:
-        encode = lambda s: [stoi[c] for c in s]
-        decode = lambda l: "".join([itos[i] for i in l])
+    encode = lambda s: [stoi[c] for c in s]
+    decode = lambda l: "".join([itos[i] for i in l])
 else:
     # ok let's assume gpt-2 encodings by default
     print("No meta.pkl found, assuming GPT-2 encodings...")
@@ -112,19 +134,27 @@ else:
     encode = lambda s: enc.encode(s, allowed_special={"<|endoftext|>"})
     decode = lambda l: enc.decode(l)
 
-# encode the beginning of the prompt
-if start.startswith("FILE:"):
-    with open(start[5:], "r", encoding="utf-8") as f:
-        start = f.read()
-start_ids = encode(start)
-x = torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...]
-
 # run generation
 with torch.no_grad():
     with ctx:
-        for k in range(num_samples):
-            y = model.generate(
-                x, max_new_tokens, temperature=temperature, top_k=top_k, verbose=True
-            )
-            print(decode(y[0].tolist()))
-            print("---------------")
+        acc_loss = 0.0
+        num_samples = 0
+        for X, Y in get_batch():
+            logits, _ = model(X)
+            loss = F.cross_entropy(
+                logits.view(-1, logits.size(-1)),
+                Y,
+                reduction="sum",
+            ) / math.log(2)
+            acc_loss += loss.item()
+            num_samples += X.shape[0]
+        print(f"total loss: {acc_loss / num_samples:.4f} bpc")
+
+with open(os.path.join(out_dir, "test.json"), "w") as f:
+    json.dump(
+        {
+            "bpc": acc_loss / num_samples,
+            "num_samples": num_samples,
+        },
+        indent=2,
+    )

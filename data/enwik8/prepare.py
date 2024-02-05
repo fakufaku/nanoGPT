@@ -19,14 +19,14 @@ if not os.path.exists(input_file_path):
     with zipfile.ZipFile(buf, "r") as zip_ref:
         zip_ref.extractall(os.path.dirname(__file__))
 
-with open(input_file_path, "r") as f:
+with open(input_file_path, "rb") as f:
     data = f.read()
-print(f"length of dataset in characters: {len(data):,}")
+print(f"length of dataset in bytes: {len(data):,}")
 
 # get all the unique characters that occur in this text
 chars = sorted(list(set(data)))
 vocab_size = len(chars)
-print("all the unique characters:", "".join(chars))
+# print("all the unique characters:", "".join(chars))
 print(f"vocab size: {vocab_size:,}")
 
 # create a mapping from characters to integers
@@ -35,14 +35,17 @@ itos = {i: ch for i, ch in enumerate(chars)}
 
 
 def encode(s):
+    if isinstance(s, str):
+        s = s.encode("utf-8")
     return [stoi[c] for c in s]  # encoder: take a string, output a list of integers
 
 
 def decode(l):
-    return "".join(
-        [itos[i] for i in l]
-    )  # decoder: take a list of integers, output a string
+    b_array = b"".join([itos[i].to_bytes(1, "big") for i in l])
+    return b_array.decode("utf-8")  # decoder: take a list of integers, output a string
 
+
+print(decode(encode(data[:100])))
 
 # create the train and test splits
 n = len(data)

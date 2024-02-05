@@ -29,3 +29,18 @@ val has 4,981,091 tokens
 test has 4,981,093 tokens
 ```
 The dataset is stored in `data/enwik8` in files `train.bin`, `val.bin`, and `test.bin`.
+
+## Train (on MacBook)
+
+```bash
+$ python train.py config/train_enwik8.py \
+  --device=cpu --compile=False --eval_iters=20 \
+  --log_interval=1 --block_size=64 --batch_size=12 \
+  --n_layer=4 --n_head=4 --n_embd=128 --max_iters=2000 \
+  --lr_decay_iters=2000 --dropout=0.0
+```
+
+## Modifications
+
+1. Divide the cross-entropy loss by `log(2)` to convert to bits per character.
+  (pytorch cross-entropy seems to be in nats, not bits)
