@@ -232,7 +232,7 @@ class GPT(nn.Module):
         # close to those at leayer n, so that the model can learn to predict itself
         # Then, we can condition on these predictions to make the model more powerful
         self.selfpred_weights = str_to_inter_weights(config.selfpred_weights)
-        self.selfpred = len(self.inter_weights) > 0
+        self.selfpred = len(self.selfpred_weights) > 0
         if self.selfpred:
             self.emb_loss = EmbeddingLoss(normalize=True)
             self.selfpred_heads = nn.ModuleDict(
@@ -356,7 +356,9 @@ class GPT(nn.Module):
                         )
                     pred = self.selfpred_heads[str(bidx)](x_prev)
                     weight = self.selfpred_weights[bidx]
-                    selfpred_loss = selfpred_loss + w * self.emb_loss(pred, x.detach())
+                    selfpred_loss = selfpred_loss + weight * self.emb_loss(
+                        pred, x.detach()
+                    )
 
                 x_prev = x
 
