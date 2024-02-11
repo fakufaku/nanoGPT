@@ -242,7 +242,7 @@ class GPT(nn.Module):
             loss = None
         return logits, loss
 
-    def forward(self, idx, targets=None, val=False):
+    def forward(self, idx, targets=None):
         device = idx.device
         b, t = idx.size()
         assert (
@@ -257,7 +257,17 @@ class GPT(nn.Module):
 
         inter_loss = []
 
-        for bidx, block in enumerate(self.transformer.h):
+        block_num = list(range(self.config.n_layer))
+        """
+        ### Quick test: random layer swap
+        if self.training:
+            perm = torch.randint(0, self.config.n_layer - 1, (1,)).item()
+            block_num[perm : perm + 2] = block_num[perm : perm + 2][::-1]
+        ###
+        """
+
+        for bidx in block_num:
+            block = self.transformer.h[bidx]
             x = block(x)
 
             if bidx in self.inter_weights:
@@ -275,7 +285,7 @@ class GPT(nn.Module):
         logits, loss = self._loss(x, targets)
 
         if loss is not None:
-            if not val:
+            if self.training:
                 if len(inter_loss) == 0:
                     inter_loss = [0.0]
                 main_weight = 1.0 - sum(self.inter_weights.values())

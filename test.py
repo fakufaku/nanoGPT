@@ -81,8 +81,6 @@ def get_batch():
     for i in tqdm(range(0, len(data) - block_size - 1, batch_size), total=num_batches):
         if max_batches > 0 and batch_idx >= max_batches:
             break
-        s = i
-        e = min
         seq = data[i : i + block_size + batch_size + 1].astype(np.int64)
         x = np.lib.stride_tricks.as_strided(
             seq[: block_size + batch_size],
