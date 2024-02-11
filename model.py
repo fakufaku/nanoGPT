@@ -169,6 +169,7 @@ class GPTConfig:
     selfpred_weights: str = ""  # self-prediction loss weights
     selfcond: bool = False  # self-conditioning on the inter-layer results
     selfcond_per_layer: bool = False  # use a different self-conditioning head per layer
+    num_future_targets: int = 0  # number of future targets to predict
 
 
 class GPT(nn.Module):
@@ -177,6 +178,11 @@ class GPT(nn.Module):
         assert config.vocab_size is not None
         assert config.block_size is not None
         self.config = config
+
+        # in addition to the next token, we predict
+        # `num_future_targets` of future token.
+        # Setting this value to zero keeps the original behavior
+        self.num_future_targets = config.num_future_targets
 
         self.transformer = nn.ModuleDict(
             dict(
@@ -187,7 +193,10 @@ class GPT(nn.Module):
                 ln_f=LayerNorm(config.n_embd, bias=config.bias),
             )
         )
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        n_targets = 1 + self.num_future_targets
+        self.lm_head = nn.Linear(
+            config.n_embd, config.vocab_size * n_targets, bias=False
+        )
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
         # This behavior is deprecated and will be an error in future versions"
@@ -207,12 +216,12 @@ class GPT(nn.Module):
                 # if we want to use a different self-conditioning head per layer
                 self.selfcond_head = nn.ModuleDict(
                     {
-                        str(k): nn.Linear(config.vocab_size, config.n_embd)
+                        str(k): nn.Linear(config.vocab_size * n_targets, config.n_embd)
                         for k in self.inter_weights.keys()
                     }
                 )
             else:
-                selfcond_head = nn.Linear(config.vocab_size, config.n_embd)
+                selfcond_head = nn.Linear(config.vocab_size * n_targets, config.n_embd)
                 # we use shared weights across all layers
                 self.selfcond_head = nn.ModuleDict(
                     {str(k): selfcond_head for k in self.inter_weights.keys()}
@@ -267,11 +276,36 @@ class GPT(nn.Module):
 
     def _loss(self, x, targets=None):
         if targets is not None:
+            # if we use more than one target, we need to reshape the targets
+            bs = self.config.block_size
+            vs = self.config.vocab_size
+            if self.training and self.num_future_targets > 0:
+                # stack targets
+                targets = torch.stack(
+                    [
+                        targets[..., i : i + bs]
+                        for i in range(self.num_future_targets + 1)
+                    ],
+                    dim=-1,
+                )
+                # (batch, block * (num_future_targets + 1))
+
             # if we are given some desired targets also calculate the loss
             logits = self.lm_head(x)
-            loss = F.cross_entropy(
-                logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1
-            ) / math.log(2.0)
+
+            if not self.training:
+                # if we are not training, we only need to return the first token
+                tgt = targets[..., :bs].contiguous()
+                lgt = logits[..., : self.config.vocab_size].contiguous()
+                loss = F.cross_entropy(
+                    lgt.view(-1, lgt.size(-1)), tgt.view(-1), ignore_index=-1
+                ) / math.log(2.0)
+
+            else:
+                loss = F.cross_entropy(
+                    logits.view(-1, vs), targets.view(-1), ignore_index=-1
+                ) / math.log(2.0)
+
             # multiply by 1 / log(2) to convert cross-entropy to base 2 log likelihood
             # and give bits-per-character instead of nats-per-character
         else:
@@ -280,6 +314,7 @@ class GPT(nn.Module):
                 x[:, [-1], :]
             )  # note: using list [-1] to preserve the time dim
             loss = None
+
         return logits, loss
 
     def forward(self, idx, targets=None):
@@ -309,23 +344,21 @@ class GPT(nn.Module):
                 if int_loss is not None:
                     inter_loss.append(int_loss * self.inter_weights[bidx])
 
-                if self.selfpred:
-                    if bidx in self.selfpred_weights:
-                        if x_prev is None:
-                            raise ValueError(
-                                "Self-prediction cannot be done at the first layer"
-                            )
-                        pred = self.selfpred_heads[str(bidx)](x_prev)
-                        weight = self.selfpred_weights[bidx]
-                        selfpred_loss = selfpred_loss + w * self.emb_loss(
-                            pred, x.detach()
-                        )
-
-                    x_prev = x
-
                 if self.selfcond:
                     pred = torch.softmax(int_logits, dim=-1).detach()
-                    x = x + self.selfcond_head[str[bidx]](pred)
+                    x = x + self.selfcond_head[str(bidx)](pred)
+
+            if self.selfpred:
+                if bidx in self.selfpred_weights:
+                    if x_prev is None:
+                        raise ValueError(
+                            "Self-prediction cannot be done at the first layer"
+                        )
+                    pred = self.selfpred_heads[str(bidx)](x_prev)
+                    weight = self.selfpred_weights[bidx]
+                    selfpred_loss = selfpred_loss + w * self.emb_loss(pred, x.detach())
+
+                x_prev = x
 
         x = self.transformer.ln_f(x)
 
@@ -340,6 +373,9 @@ class GPT(nn.Module):
 
                 # add self-prediction loss
                 loss = loss + selfpred_loss
+
+        # we remove extra predicted tokens at the end, if any
+        logits = logits[..., : self.config.vocab_size]
 
         return logits, loss
 

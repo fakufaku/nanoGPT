@@ -59,6 +59,7 @@ inter_weights = ""
 selfpred_weights = ""
 selfcond = False
 selfcond_per_layer = False
+num_future_targets = 0  # how many future targets to predict, 0 is the default
 # adamw optimizer
 learning_rate = 6e-4  # max learning rate
 max_iters = 600000  # total number of training iterations
@@ -148,7 +149,9 @@ def get_batch(split):
     )
     y = torch.stack(
         [
-            torch.from_numpy((data[i + 1 : i + 1 + block_size]).astype(np.int64))
+            torch.from_numpy(
+                (data[i + 1 : i + 1 + block_size + num_future_targets]).astype(np.int64)
+            )
             for i in ix
         ]
     )
@@ -188,6 +191,7 @@ model_args = dict(
     selfpred_weights=selfpred_weights,
     selfcond=selfcond,
     selfcond_per_layer=selfcond_per_layer,
+    num_future_targets=num_future_targets,
 )  # start with model_args from command line
 if init_from == "scratch":
     # init a new model from scratch
@@ -219,6 +223,7 @@ elif init_from == "resume":
         "selfpred_weights",
         "selfcond",
         "selfcond_per_layer",
+        "num_future_targets",
     ]:
         model_args[k] = checkpoint_model_args[k]
     # create the model
