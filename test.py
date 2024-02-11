@@ -71,8 +71,6 @@ data_dir = os.path.join("data", dataset)
 test_data = np.memmap(os.path.join(data_dir, "test.bin"), dtype=np.uint16, mode="r")
 block_size = checkpoint["config"]["block_size"]
 data = test_data
-last_batch = len(data) - (batch_size + -block_size + 1)
-data = data[last_batch:]
 num_batches = math.ceil((len(data) - block_size - 1) / batch_size)
 if max_batches > 0:
     num_batches = min(num_batches, max_batches)
@@ -159,5 +157,6 @@ with open(os.path.join(out_dir, "test.json"), "w") as f:
             "bpc": acc_loss / num_samples,
             "num_samples": num_samples,
         },
+        f,
         indent=2,
     )
