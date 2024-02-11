@@ -57,7 +57,8 @@ bias = False  # do we use bias inside LayerNorm and Linear layers?
 # inter-loss and self-cond
 inter_weights = ""
 selfpred_weights = ""
-selfcond = True
+selfcond = False
+selfcond_per_layer = False
 # adamw optimizer
 learning_rate = 6e-4  # max learning rate
 max_iters = 600000  # total number of training iterations
@@ -186,6 +187,7 @@ model_args = dict(
     inter_weights=inter_weights,
     selfpred_weights=selfpred_weights,
     selfcond=selfcond,
+    selfcond_per_layer=selfcond_per_layer,
 )  # start with model_args from command line
 if init_from == "scratch":
     # init a new model from scratch
@@ -214,7 +216,9 @@ elif init_from == "resume":
         "bias",
         "vocab_size",
         "inter_weights",
+        "selfpred_weights",
         "selfcond",
+        "selfcond_per_layer",
     ]:
         model_args[k] = checkpoint_model_args[k]
     # create the model

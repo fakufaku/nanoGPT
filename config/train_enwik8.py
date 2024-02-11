@@ -38,6 +38,7 @@ warmup_iters = 100  # not super necessary potentially
 inter_weights = ""
 selfpred_weights = ""
 selfcond = False
+selfcond_per_layer = False
 
 # on macbook also add
 # device = 'cpu'  # run on cpu only

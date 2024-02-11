@@ -168,6 +168,7 @@ class GPTConfig:
     inter_weights: str = ""  # inter-layer loss weights
     selfpred_weights: str = ""  # self-prediction loss weights
     selfcond: bool = False  # self-conditioning on the inter-layer results
+    selfcond_per_layer: bool = False  # use a different self-conditioning head per layer
 
 
 class GPT(nn.Module):
@@ -198,10 +199,24 @@ class GPT(nn.Module):
         # inter-loss and self-conditioning
         self.inter_weights = str_to_inter_weights(config.inter_weights)
         self.selfcond = config.selfcond
+        self.selfcond_per_layer = config.selfcond_per_layer
 
         if self.selfcond:
             # self-conditioning head is shared accross all layers
-            self.selfcond_head = nn.Linear(config.vocab_size, config.n_embd)
+            if self.selfcond_per_layer:
+                # if we want to use a different self-conditioning head per layer
+                self.selfcond_head = nn.ModuleDict(
+                    {
+                        str(k): nn.Linear(config.vocab_size, config.n_embd)
+                        for k in self.inter_weights.keys()
+                    }
+                )
+            else:
+                selfcond_head = nn.Linear(config.vocab_size, config.n_embd)
+                # we use shared weights across all layers
+                self.selfcond_head = nn.ModuleDict(
+                    {str(k): selfcond_head for k in self.inter_weights.keys()}
+                )
 
         # self-prediction:
         # we add a loss that encourage the embeddings at layer n-1 to be already
@@ -294,10 +309,6 @@ class GPT(nn.Module):
                 if int_loss is not None:
                     inter_loss.append(int_loss * self.inter_weights[bidx])
 
-                if self.selfcond:
-                    pred = torch.softmax(int_logits, dim=-1).detach()
-                    x = x + self.selfcond_head(pred)
-
                 if self.selfpred:
                     if bidx in self.selfpred_weights:
                         if x_prev is None:
@@ -311,6 +322,10 @@ class GPT(nn.Module):
                         )
 
                     x_prev = x
+
+                if self.selfcond:
+                    pred = torch.softmax(int_logits, dim=-1).detach()
+                    x = x + self.selfcond_head[str[bidx]](pred)
 
         x = self.transformer.ln_f(x)
 
