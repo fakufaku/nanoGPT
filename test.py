@@ -71,6 +71,8 @@ data_dir = os.path.join("data", dataset)
 test_data = np.memmap(os.path.join(data_dir, "test.bin"), dtype=np.uint16, mode="r")
 block_size = checkpoint["config"]["block_size"]
 data = test_data
+last_batch = len(data) - (batch_size + -block_size + 1)
+data = data[last_batch:]
 num_batches = math.ceil((len(data) - block_size - 1) / batch_size)
 if max_batches > 0:
     num_batches = min(num_batches, max_batches)
@@ -78,16 +80,19 @@ if max_batches > 0:
 
 def get_batch():
     batch_idx = 0
-    for i in tqdm(range(0, len(data) - block_size - 1, batch_size), total=num_batches):
+    for i in tqdm(
+        range(0, len(data) - (batch_size + block_size), batch_size), total=num_batches
+    ):
         if max_batches > 0 and batch_idx >= max_batches:
             break
-        seq = data[i : i + block_size + batch_size + 1].astype(np.int64)
+        B = min(batch_size, len(data) - i)
+        seq = data[i : i + block_size + B].astype(np.int64)
         x = np.lib.stride_tricks.as_strided(
-            seq[: block_size + batch_size],
-            shape=(batch_size, block_size),
+            seq[: block_size + B - 1],
+            shape=(B, block_size),
             strides=(seq.strides[0], seq.strides[0]),
         )
-        y = seq[block_size : block_size + batch_size]
+        y = seq[block_size : block_size + B]
         # pass to torch
         x = torch.from_numpy(x).contiguous()
         y = torch.from_numpy(y).contiguous()

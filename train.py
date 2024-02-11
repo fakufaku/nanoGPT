@@ -56,6 +56,7 @@ dropout = 0.0  # for pretraining 0 is good, for finetuning try 0.1+
 bias = False  # do we use bias inside LayerNorm and Linear layers?
 # inter-loss and self-cond
 inter_weights = ""
+selfpred_weights = ""
 selfcond = True
 # adamw optimizer
 learning_rate = 6e-4  # max learning rate
@@ -183,6 +184,7 @@ model_args = dict(
     vocab_size=None,
     dropout=dropout,
     inter_weights=inter_weights,
+    selfpred_weights=selfpred_weights,
     selfcond=selfcond,
 )  # start with model_args from command line
 if init_from == "scratch":

@@ -33,7 +33,10 @@ beta2 = 0.99  # make a bit bigger because number of tokens per iter is small
 warmup_iters = 100  # not super necessary potentially
 
 # new arguments
-inter_weights = "2:0.25,4:0.25"
+# weights are given as a string of the form "layer:weight,layer:weight,..."
+# e.g. "2:0.25,4:0.25"
+inter_weights = ""
+selfpred_weights = ""
 selfcond = False
 
 # on macbook also add

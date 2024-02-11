@@ -26,6 +26,19 @@ def str_to_inter_weights(s):
     return {int(k): float(v) for k, v in [kv.split(":") for kv in s.split(",")]}
 
 
+class EmbeddingLoss(nn.Module):
+    def __init__(self, normalize=False):
+        super().__init__()
+        self.loss = nn.MSELoss()
+        self.normalize = normalize
+
+    def forward(self, x, targets):
+        if self.normalize:
+            x = F.normalize(x, p=2, dim=-1)
+            targets = F.normalize(targets, p=2, dim=-1)
+        return self.loss(x, targets)
+
+
 class LayerNorm(nn.Module):
     """LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False"""
 
@@ -153,6 +166,7 @@ class GPTConfig:
     dropout: float = 0.0
     bias: bool = True  # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
     inter_weights: str = ""  # inter-layer loss weights
+    selfpred_weights: str = ""  # self-prediction loss weights
     selfcond: bool = False  # self-conditioning on the inter-layer results
 
 
@@ -186,10 +200,21 @@ class GPT(nn.Module):
         self.selfcond = config.selfcond
 
         if self.selfcond:
-            self.selfcond_head = nn.ModuleDict(
+            # self-conditioning head is shared accross all layers
+            self.selfcond_head = nn.Linear(config.vocab_size, config.n_embd)
+
+        # self-prediction:
+        # we add a loss that encourage the embeddings at layer n-1 to be already
+        # close to those at leayer n, so that the model can learn to predict itself
+        # Then, we can condition on these predictions to make the model more powerful
+        self.selfpred_weights = str_to_inter_weights(config.selfpred_weights)
+        self.selfpred = len(self.inter_weights) > 0
+        if self.selfpred:
+            self.emb_loss = EmbeddingLoss(normalize=True)
+            self.selfpred_heads = nn.ModuleDict(
                 {
-                    str(k): nn.Linear(config.vocab_size, config.n_embd)
-                    for k in self.inter_weights.keys()
+                    str(k): nn.Linear(config.n_embd, config.n_embd)
+                    for k in self.selfpred_weights.keys()
                 }
             )
 
@@ -256,17 +281,10 @@ class GPT(nn.Module):
         x = self.transformer.drop(tok_emb + pos_emb)
 
         inter_loss = []
+        selfpred_loss = 0.0
+        x_prev = None  # keep track of embeddings at previous layer
 
-        block_num = list(range(self.config.n_layer))
-        """
-        ### Quick test: random layer swap
-        if self.training:
-            perm = torch.randint(0, self.config.n_layer - 1, (1,)).item()
-            block_num[perm : perm + 2] = block_num[perm : perm + 2][::-1]
-        ###
-        """
-
-        for bidx in block_num:
+        for bidx in range(self.config.n_layer):
             block = self.transformer.h[bidx]
             x = block(x)
 
@@ -278,7 +296,21 @@ class GPT(nn.Module):
 
                 if self.selfcond:
                     pred = torch.softmax(int_logits, dim=-1).detach()
-                    x = x + self.selfcond_head[str(bidx)](pred)
+                    x = x + self.selfcond_head(pred)
+
+                if self.selfpred:
+                    if bidx in self.selfpred_weights:
+                        if x_prev is None:
+                            raise ValueError(
+                                "Self-prediction cannot be done at the first layer"
+                            )
+                        pred = self.selfpred_heads[str(bidx)](x_prev)
+                        weight = self.selfpred_weights[bidx]
+                        selfpred_loss = selfpred_loss + w * self.emb_loss(
+                            pred, x.detach()
+                        )
+
+                    x_prev = x
 
         x = self.transformer.ln_f(x)
 
@@ -290,6 +322,9 @@ class GPT(nn.Module):
                     inter_loss = [0.0]
                 main_weight = 1.0 - sum(self.inter_weights.values())
                 loss = main_weight * loss + sum(inter_loss)
+
+                # add self-prediction loss
+                loss = loss + selfpred_loss
 
         return logits, loss
 
