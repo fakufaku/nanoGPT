@@ -16,7 +16,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from tqdm import tqdm
-from iva import IVA
+from ica import FeatureICA
 
 
 def str_to_inter_weights(s):
@@ -210,6 +210,17 @@ class GPT(nn.Module):
         self.selfcond = config.selfcond
         self.selfcond_per_layer = config.selfcond_per_layer
 
+        self.icas = nn.ModuleDict(
+            {
+                "0": FeatureICA(
+                    num_groups=4, num_iter=10, mask_floor=1e-5, q=1.0, eps=1e-3
+                ),
+                "1": FeatureICA(
+                    num_groups=4, num_iter=10, mask_floor=1e-5, q=1.0, eps=1e-3
+                ),
+            }
+        )
+
         if self.selfcond:
             # self-conditioning head is shared accross all layers
             if self.selfcond_per_layer:
@@ -335,6 +346,9 @@ class GPT(nn.Module):
         x_prev = None  # keep track of embeddings at previous layer
 
         for bidx in range(self.config.n_layer):
+            if str(bidx) in self.icas:
+                x = self.icas[str(bidx)](x)
+
             block = self.transformer.h[bidx]
             x = block(x)
 
