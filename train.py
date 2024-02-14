@@ -60,6 +60,7 @@ selfpred_weights = ""
 selfcond = False
 selfcond_per_layer = False
 num_future_targets = 0  # how many future targets to predict, 0 is the default
+ica_layers = ()  # layers where ICA should be applied to the features
 # adamw optimizer
 learning_rate = 6e-4  # max learning rate
 max_iters = 600000  # total number of training iterations
@@ -192,6 +193,7 @@ model_args = dict(
     selfcond=selfcond,
     selfcond_per_layer=selfcond_per_layer,
     num_future_targets=num_future_targets,
+    ica_layers=ica_layers,
 )  # start with model_args from command line
 if init_from == "scratch":
     # init a new model from scratch
@@ -224,6 +226,7 @@ elif init_from == "resume":
         "selfcond",
         "selfcond_per_layer",
         "num_future_targets",
+        "ica_layers",
     ]:
         model_args[k] = checkpoint_model_args[k]
     # create the model

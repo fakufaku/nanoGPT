@@ -7,7 +7,7 @@ https://github.com/openai/gpt-2/blob/master/src/model.py
 https://github.com/huggingface/transformers/blob/main/src/transformers/models/gpt2/modeling_gpt2.py
 """
 
-from typing import Dict
+from typing import Dict, Tuple
 import math
 import inspect
 from dataclasses import dataclass
@@ -170,6 +170,7 @@ class GPTConfig:
     selfcond: bool = False  # self-conditioning on the inter-layer results
     selfcond_per_layer: bool = False  # use a different self-conditioning head per layer
     num_future_targets: int = 0  # number of future targets to predict
+    ica_layers: Tuple[int] = ()  # layers to apply ICA to
 
 
 class GPT(nn.Module):
@@ -210,16 +211,15 @@ class GPT(nn.Module):
         self.selfcond = config.selfcond
         self.selfcond_per_layer = config.selfcond_per_layer
 
-        self.icas = nn.ModuleDict(
-            {
-                "0": FeatureICA(
-                    num_groups=4, num_iter=10, mask_floor=1e-5, q=1.0, eps=1e-3
-                ),
-                "1": FeatureICA(
-                    num_groups=4, num_iter=10, mask_floor=1e-5, q=1.0, eps=1e-3
-                ),
-            }
-        )
+        if len(config.ica_layers) > 0:
+            ica_blocks = {}
+            for i in config.ica_layers:
+                ica_blocks[str(i)] = FeatureICA(
+                    num_groups=4, num_iter=5, mask_floor=1e-5, q=1.0, eps=1e-3
+                )
+            self.ica_blocks = nn.ModuleDict(ica_blocks)
+        else:
+            self.ica_blocks = None
 
         if self.selfcond:
             # self-conditioning head is shared accross all layers
@@ -346,8 +346,8 @@ class GPT(nn.Module):
         x_prev = None  # keep track of embeddings at previous layer
 
         for bidx in range(self.config.n_layer):
-            if str(bidx) in self.icas:
-                x = self.icas[str(bidx)](x)
+            if self.ica_blocks is not None and str(bidx) in self.ica_blocks:
+                x = self.ica_blocks[str(bidx)](x)
 
             block = self.transformer.h[bidx]
             x = block(x)

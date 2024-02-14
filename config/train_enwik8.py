@@ -40,6 +40,7 @@ selfpred_weights = ""
 selfcond = False
 selfcond_per_layer = False
 num_future_targets = 0
+ica_layers = ()
 
 # on macbook also add
 # device = 'cpu'  # run on cpu only
