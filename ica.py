@@ -123,12 +123,12 @@ class FeatureICA(nn.Module):
     def forward(self, x):
         """x.shape == (batch, time, features)"""
         x_shape = x.shape
-        x = x.reshape(x.shape[:2] + (self.num_groups, -1))
+        x = x.reshape(x_shape[:2] + (self.num_groups, -1))
 
         # independent vector analysis loop
         q = self._get_q()[..., None]
 
-        x, W, A = ica_core(x, q, self.num_iter, self.mask_floor, self.eps)
+        x = ica_core(x, q, self.num_iter, self.mask_floor, self.eps)
 
         x = x.reshape(x_shape)
         return x
