@@ -215,7 +215,7 @@ class GPT(nn.Module):
             ica_blocks = {}
             for i in config.ica_layers:
                 ica_blocks[str(i)] = FeatureICA(
-                    num_groups=4, num_iter=5, mask_floor=1e-5, q=1.0, eps=1e-3
+                    num_groups=2, num_iter=5, mask_floor=1e-5, q=1.0, eps=1e-3
                 )
             self.ica_blocks = nn.ModuleDict(ica_blocks)
         else:
