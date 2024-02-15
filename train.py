@@ -61,6 +61,8 @@ selfcond = False
 selfcond_per_layer = False
 num_future_targets = 0  # how many future targets to predict, 0 is the default
 ica_layers = ()  # layers where ICA should be applied to the features
+use_conv_norm = False  # use convolutional normalization instead of layer norm
+conv_norm_kernel = 11  # kernel size to use for convolutional normalization
 # adamw optimizer
 learning_rate = 6e-4  # max learning rate
 max_iters = 600000  # total number of training iterations
@@ -194,6 +196,8 @@ model_args = dict(
     selfcond_per_layer=selfcond_per_layer,
     num_future_targets=num_future_targets,
     ica_layers=ica_layers,
+    use_conv_norm=use_conv_norm,
+    conv_norm_kernel=conv_norm_kernel,
 )  # start with model_args from command line
 if init_from == "scratch":
     # init a new model from scratch
@@ -227,6 +231,8 @@ elif init_from == "resume":
         "selfcond_per_layer",
         "num_future_targets",
         "ica_layers",
+        "use_conv_norm",
+        "conv_norm_kernel",
     ]:
         model_args[k] = checkpoint_model_args[k]
     # create the model

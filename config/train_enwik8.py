@@ -41,6 +41,9 @@ selfcond = False
 selfcond_per_layer = False
 num_future_targets = 0
 ica_layers = ()
+use_conv_norm = False
+conv_norm_kernel = 11
+
 
 # on macbook also add
 # device = 'cpu'  # run on cpu only
