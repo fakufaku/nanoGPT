@@ -40,7 +40,10 @@ def _compute_iss_update_ica(
     return Y, W, A
 
 
-compute_iss_update_ica = torch.compile(_compute_iss_update_ica)
+if torch.cuda.is_available():
+    compute_iss_update_ica = torch.compile(_compute_iss_update_ica)
+else:
+    compute_iss_update_ica = _compute_iss_update_ica
 
 
 def _ica(
@@ -75,7 +78,10 @@ def _ica(
     return x
 
 
-ica_core = torch.compile(_ica)
+if torch.cuda.is_available():
+    ica_core = torch.compile(_ica)
+else:
+    ica_core = _ica
 
 
 class FeatureICA(nn.Module):

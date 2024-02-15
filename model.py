@@ -51,6 +51,30 @@ class LayerNorm(nn.Module):
         return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
 
 
+class ConvNorm(nn.Module):
+    """A kind of Norm that normalizes based on local energy rather than just a single feature"""
+
+    def __init__(self, ndim, bias, kernel=11):
+        super().__init__()
+        self.weights = nn.Parameter(torch.ones(ndim, 1, kernel))
+        self.bias = nn.Parameter(torch.zeros(ndim)) if bias else None
+
+    def forward(self, input):
+        weights = torch.softmax(self.weights, dim=-1)
+
+        # local energy
+        energy = input**2  # (b, t, c)
+        energy = F.pad(energy, (self.kernel - 1, 0))
+        smooth_energy = F.conv1d(energy, weights, groups=input.shape[2])
+        rms = torch.sqrt(smooth_energy + 1e-5)
+
+        input = input / rms
+
+        if self.bias is not None:
+            input = input + self.bias
+        return input
+
+
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -145,9 +169,11 @@ class MLP(nn.Module):
 class Block(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.ln_1 = LayerNorm(config.n_embd, bias=config.bias)
+        # self.ln_1 = LayerNorm(config.n_embd, bias=config.bias)
+        self.ln_1 = ConvNorm(config.n_embd, bias=config.bias, kernel=11)
         self.attn = CausalSelfAttention(config)
-        self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
+        # self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
+        self.ln_2 = ConvNorm(config.n_embd, bias=config.bias, kernel=11)
         self.mlp = MLP(config)
 
     def forward(self, x):
