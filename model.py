@@ -51,6 +51,45 @@ class LayerNorm(nn.Module):
         return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
 
 
+class ConvNorm(nn.Module):
+    """Convolutional Normalization
+
+    A kind of Norm that normalizes based on local energy rather than just a single feature
+
+    1) The per-feature instantaneous energy is calculated
+    2) The energy is smoothed with a filter whose weights are positive, summing to one
+    3) The smoothed energy is averaged across all features
+    4) The feature vectors are normalized by the square root of the average local energy
+    """
+
+    def __init__(self, ndim, bias, kernel=11):
+        super().__init__()
+        self.kernel = kernel
+        self.weights = nn.Parameter(torch.ones(ndim, 1, kernel))
+        self.bias = nn.Parameter(torch.zeros(ndim)) if bias else None
+
+    def forward(self, input):
+        input = input.transpose(1, 2)
+
+        # make the convolution weights sum to one
+        weights = torch.softmax(self.weights, dim=-1)
+
+        # local energy
+        energy = input**2  # (b, t, c)
+        energy = F.pad(energy, (self.kernel - 1, 0))
+        smooth_energy = F.conv1d(energy, weights, groups=input.shape[1])
+        rms = torch.sqrt(smooth_energy.mean(dim=-1, keepdim=True) + 1e-5)
+
+        input = input / (rms + 1e-5)
+
+        input = input.transpose(1, 2)
+
+        if self.bias is not None:
+            input = input + self.bias
+
+        return input
+
+
 class CausalSelfAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -145,9 +184,21 @@ class MLP(nn.Module):
 class Block(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.ln_1 = LayerNorm(config.n_embd, bias=config.bias)
+        if config.use_conv_norm:
+            self.ln_1 = ConvNorm(
+                config.n_embd, bias=config.bias, kernel=config.conv_norm_kernel
+            )
+        else:
+            self.ln_1 = LayerNorm(config.n_embd, bias=config.bias)
+
         self.attn = CausalSelfAttention(config)
-        self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
+
+        if config.use_conv_norm:
+            self.ln_2 = ConvNorm(
+                config.n_embd, bias=config.bias, kernel=config.conv_norm_kernel
+            )
+        else:
+            self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
         self.mlp = MLP(config)
 
     def forward(self, x):
@@ -171,6 +222,8 @@ class GPTConfig:
     selfcond_per_layer: bool = False  # use a different self-conditioning head per layer
     num_future_targets: int = 0  # number of future targets to predict
     ica_layers: Tuple[int] = ()  # layers to apply ICA to
+    use_conv_norm: bool = False  # use convolutional normalization instead of layer norm
+    conv_norm_kernel: int = 11  # kernel size to use for convolutional normalization
 
 
 class GPT(nn.Module):
