@@ -51,7 +51,7 @@ class LayerNorm(nn.Module):
         return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
 
 
-class ConvNorm(nn.Module):
+class ConvNorm_0(nn.Module):
     """Convolutional Normalization
 
     A kind of Norm that normalizes based on local energy rather than just a single feature
@@ -69,7 +69,7 @@ class ConvNorm(nn.Module):
         self.bias = nn.Parameter(torch.zeros(ndim)) if bias else None
 
     def forward(self, input):
-        input = input.transpose(1, 2)
+        input = input.transpose(1, 2) # (b, t, c) -> (b, c, t)
 
         # make the convolution weights sum to one
         weights = torch.softmax(self.weights, dim=-1)
@@ -82,8 +82,49 @@ class ConvNorm(nn.Module):
 
         input = input / (rms + 1e-5)
 
-        input = input.transpose(1, 2)
+        input = input.transpose(1, 2) # (b, c, t) -> (b, t, c)
 
+        if self.bias is not None:
+            input = input + self.bias
+
+        return input
+
+class ConvNorm(nn.Module):
+    """Convolutional Normalization
+
+    A kind of Norm that normalizes based on local rather than instantaneous
+    statistics
+    """
+
+    def __init__(self, ndim, bias, kernel=11):
+        super().__init__()
+        self.kernel = kernel
+        self.weights_mean = nn.Parameter(torch.zeros(1, ndim, kernel))
+        self.weights_var = nn.Parameter(torch.zeros(1, ndim, kernel))
+        self.bias = nn.Parameter(torch.zeros(ndim)) if bias else None
+        self.gamma = nn.Parameter(torch.ones(ndim))
+
+    def forward(self, input):
+        input = input.transpose(1, 2) # (b, t, c) -> (b, c, t)
+
+        # make the convolution weights sum to one
+        weights_mean = torch.softmax(self.weights_mean.flatten(), dim=0)
+        weights_mean = weights_mean.reshape(self.weights_mean.shape)
+        weights_var = torch.softmax(self.weights_var.flatten(), dim=0)
+        weights_var = weights_var.reshape(self.weights_var.shape)
+
+        # local mean/variance
+        input_pad = F.pad(input, (self.kernel - 1, 0), mode="replicate")
+        mean = F.conv1d(input_pad, weights_mean)
+        mean_pad = F.pad(mean, (self.kernel - 1, 0), mode="replicate")
+        var = F.conv1d((input_pad - mean_pad) ** 2, weights_var) # (b, t, c)
+        
+        # normalize
+        input = (input - mean) / (var + 1e-5).sqrt()
+
+        input = input.transpose(1, 2) # (b, c, t) -> (b, t, c)
+
+        input = input * self.gamma
         if self.bias is not None:
             input = input + self.bias
 
