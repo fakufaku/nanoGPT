@@ -96,11 +96,16 @@ class ConvNorm(nn.Module):
     statistics
     """
 
-    def __init__(self, ndim, bias, kernel=11):
+    def __init__(self, ndim, bias, kernel=11, shared_filter=False):
         super().__init__()
         self.kernel = kernel
-        self.weights_mean = nn.Parameter(torch.zeros(1, ndim, kernel))
-        self.weights_var = nn.Parameter(torch.zeros(1, ndim, kernel))
+        self.shared_filter = shared_filter
+        if shared_filter:
+            self.weights_mean = nn.Parameter(torch.zeros(1, 1, kernel))
+            self.weights_var = nn.Parameter(torch.zeros(1, 1, kernel))
+        else:
+            self.weights_mean = nn.Parameter(torch.zeros(1, ndim, kernel))
+            self.weights_var = nn.Parameter(torch.zeros(1, ndim, kernel))
         self.bias = nn.Parameter(torch.zeros(ndim)) if bias else None
         self.gamma = nn.Parameter(torch.ones(ndim))
 
@@ -115,9 +120,15 @@ class ConvNorm(nn.Module):
 
         # local mean/variance
         input_pad = F.pad(input, (self.kernel - 1, 0), mode="replicate")
+        if self.shared_filter:
+            input_pad = input_pad.mean(dim=1, keepdim=True)
         mean = F.conv1d(input_pad, weights_mean)
         mean_pad = F.pad(mean, (self.kernel - 1, 0), mode="replicate")
-        var = F.conv1d((input_pad - mean_pad) ** 2, weights_var) # (b, t, c)
+        if self.shared_filter:
+          sq_dev = torch.mean((input_pad - mean_pad) ** 2, dim=1, keepdim=True)
+        else:
+          sq_dev = (input_pad - mean_pad) ** 2
+        var = F.conv1d(sq_dev, weights_var) # (b, t, c)
         
         # normalize
         input = (input - mean) / (var + 1e-5).sqrt()
@@ -227,7 +238,10 @@ class Block(nn.Module):
         super().__init__()
         if config.use_conv_norm:
             self.ln_1 = ConvNorm(
-                config.n_embd, bias=config.bias, kernel=config.conv_norm_kernel
+                config.n_embd,
+                bias=config.bias,
+                kernel=config.conv_norm_kernel,
+                shared_filter=config.conv_norm_shared_filter,
             )
         else:
             self.ln_1 = LayerNorm(config.n_embd, bias=config.bias)
@@ -236,7 +250,10 @@ class Block(nn.Module):
 
         if config.use_conv_norm:
             self.ln_2 = ConvNorm(
-                config.n_embd, bias=config.bias, kernel=config.conv_norm_kernel
+                config.n_embd,
+                bias=config.bias,
+                kernel=config.conv_norm_kernel,
+                shared_filter=config.conv_norm_shared_filter,
             )
         else:
             self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
@@ -265,6 +282,7 @@ class GPTConfig:
     ica_layers: Tuple[int] = ()  # layers to apply ICA to
     use_conv_norm: bool = False  # use convolutional normalization instead of layer norm
     conv_norm_kernel: int = 11  # kernel size to use for convolutional normalization
+    conv_norm_shared_filter: bool = False  # share the weights across all feature dimensions
 
 
 class GPT(nn.Module):
@@ -315,6 +333,7 @@ class GPT(nn.Module):
         else:
             self.ica_blocks = None
 
+        # self-conditioning (robin scheibler)
         if self.selfcond:
             # self-conditioning head is shared accross all layers
             if self.selfcond_per_layer:
@@ -332,7 +351,7 @@ class GPT(nn.Module):
                     {str(k): selfcond_head for k in self.inter_weights.keys()}
                 )
 
-        # self-prediction:
+        # self-prediction: (robin scheibler)
         # we add a loss that encourage the embeddings at layer n-1 to be already
         # close to those at leayer n, so that the model can learn to predict itself
         # Then, we can condition on these predictions to make the model more powerful
