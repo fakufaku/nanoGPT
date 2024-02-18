@@ -96,7 +96,7 @@ class ConvNorm(nn.Module):
     statistics
     """
 
-    def __init__(self, ndim, bias, kernel=11, shared_filter=False):
+    def __init__(self, ndim, bias, weights=False, kernel=11, shared_filter=False):
         super().__init__()
         self.kernel = kernel
         self.shared_filter = shared_filter
@@ -118,17 +118,18 @@ class ConvNorm(nn.Module):
         weights_var = torch.softmax(self.weights_var.flatten(), dim=0)
         weights_var = weights_var.reshape(self.weights_var.shape)
 
-        # local mean/variance
+        # local mean
         input_pad = F.pad(input, (self.kernel - 1, 0), mode="replicate")
         if self.shared_filter:
             input_pad = input_pad.mean(dim=1, keepdim=True)
         mean = F.conv1d(input_pad, weights_mean)
-        mean_pad = F.pad(mean, (self.kernel - 1, 0), mode="replicate")
+
+        # local variance
+        sq_dev = (input - mean) ** 2
         if self.shared_filter:
-          sq_dev = torch.mean((input_pad - mean_pad) ** 2, dim=1, keepdim=True)
-        else:
-          sq_dev = (input_pad - mean_pad) ** 2
-        var = F.conv1d(sq_dev, weights_var) # (b, t, c)
+          sq_dev = sq_dev.mean(dim=1, keepdim=True)
+        sq_dev_pad = F.pad(sq_dev, (self.kernel - 1, 0), mode="replicate")
+        var = F.conv1d(sq_dev_pad, weights_var) # (b, t, c)
         
         # normalize
         input = (input - mean) / (var + 1e-5).sqrt()
