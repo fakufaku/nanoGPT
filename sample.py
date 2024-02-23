@@ -4,10 +4,12 @@ Sample from a trained model
 import os
 import pickle
 from contextlib import nullcontext
-import torch
+
 import tiktoken
-from model import GPTConfig, GPT
+import torch
 import tqdm
+
+from model import GPT, GPTConfig
 
 # -----------------------------------------------------------------------------
 init_from = (

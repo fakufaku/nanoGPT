@@ -16,18 +16,18 @@ $ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123
 (If your cluster does not have Infiniband interconnect prepend NCCL_IB_DISABLE=1)
 """
 
-import os
-import time
 import math
+import os
 import pickle
+import time
 from contextlib import nullcontext
 
 import numpy as np
 import torch
+from torch.distributed import destroy_process_group, init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.distributed import init_process_group, destroy_process_group
 
-from model import GPTConfig, GPT
+from model import GPT, GPTConfig
 
 # -----------------------------------------------------------------------------
 # default config values designed to train a gpt2 (124M) on OpenWebText
@@ -60,10 +60,9 @@ selfpred_weights = ""
 selfcond = False
 selfcond_per_layer = False
 num_future_targets = 0  # how many future targets to predict, 0 is the default
-ica_layers = ()  # layers where ICA should be applied to the features
 use_conv_norm = False  # use convolutional normalization instead of layer norm
 conv_norm_kernel = 11  # kernel size to use for convolutional normalization
-conv_norm_shared_filter = False # if true the same weights are used across all dimensions
+conv_norm_shared_filter = False  # true: share weights all dimensions
 # adamw optimizer
 learning_rate = 6e-4  # max learning rate
 max_iters = 600000  # total number of training iterations
@@ -196,7 +195,6 @@ model_args = dict(
     selfcond=selfcond,
     selfcond_per_layer=selfcond_per_layer,
     num_future_targets=num_future_targets,
-    ica_layers=ica_layers,
     use_conv_norm=use_conv_norm,
     conv_norm_kernel=conv_norm_kernel,
     conv_norm_shared_filter=conv_norm_shared_filter,
@@ -232,7 +230,6 @@ elif init_from == "resume":
         "selfcond",
         "selfcond_per_layer",
         "num_future_targets",
-        "ica_layers",
         "use_conv_norm",
         "conv_norm_kernel",
         "conv_norm_shared_filter",

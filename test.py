@@ -1,17 +1,19 @@
 """
 Sample from a trained model
 """
+import json
 import math
 import os
-import json
 import pickle
-import numpy as np
 from contextlib import nullcontext
+
+import numpy as np
+import tiktoken
 import torch
 import torch.nn.functional as F
-import tiktoken
 from tqdm import tqdm
-from model import GPTConfig, GPT
+
+from model import GPT, GPTConfig
 
 # -----------------------------------------------------------------------------
 init_from = (

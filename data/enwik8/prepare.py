@@ -7,9 +7,10 @@ encoder and decoder and some other related info.
 import io
 import os
 import pickle
-import requests
-import numpy as np
 import zipfile
+
+import numpy as np
+import requests
 
 # download the enwik8 dataset
 input_file_path = os.path.join(os.path.dirname(__file__), "enwik8")

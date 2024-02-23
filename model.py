@@ -7,16 +7,16 @@ https://github.com/openai/gpt-2/blob/master/src/model.py
 https://github.com/huggingface/transformers/blob/main/src/transformers/models/gpt2/modeling_gpt2.py
 """
 
-from typing import Dict, Tuple
-import math
 import inspect
+import math
 from dataclasses import dataclass
+from typing import Dict, Tuple
 
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from tqdm import tqdm
-from ica import FeatureICA
+
 from convnorm import ConvNorm
 
 
@@ -28,12 +28,26 @@ def str_to_inter_weights(s):
 
 
 class EmbeddingLoss(nn.Module):
+    """
+    A simple MSE loss between embeddings with optional length normalization
+
+    Added by Robin Scheibler
+
+    Args:
+        normalize (bool): whether to normalize the embeddings before computing the loss
+    """
+
     def __init__(self, normalize=False):
         super().__init__()
         self.loss = nn.MSELoss()
         self.normalize = normalize
 
     def forward(self, x, targets):
+        """
+        Args:
+            x (torch.Tensor): the input embeddings
+            targets (torch.Tensor): the target embeddings
+        """
         if self.normalize:
             x = F.normalize(x, p=2, dim=-1)
             targets = F.normalize(targets, p=2, dim=-1)
@@ -147,6 +161,7 @@ class Block(nn.Module):
     def __init__(self, config):
         super().__init__()
         if config.use_conv_norm:
+            # optional use of the convolutional normalization (R. Scheibler)
             self.ln_1 = ConvNorm(
                 config.n_embd,
                 bias=config.bias,
@@ -159,6 +174,7 @@ class Block(nn.Module):
         self.attn = CausalSelfAttention(config)
 
         if config.use_conv_norm:
+            # optional use of the convolutional normalization (R. Scheibler)
             self.ln_2 = ConvNorm(
                 config.n_embd,
                 bias=config.bias,
@@ -189,7 +205,6 @@ class GPTConfig:
     selfcond: bool = False  # self-conditioning on the inter-layer results
     selfcond_per_layer: bool = False  # use a different self-conditioning head per layer
     num_future_targets: int = 0  # number of future targets to predict
-    ica_layers: Tuple[int] = ()  # layers to apply ICA to
     use_conv_norm: bool = False  # use convolutional normalization instead of layer norm
     conv_norm_kernel: int = 11  # kernel size to use for convolutional normalization
     conv_norm_shared_filter: bool = (
@@ -207,7 +222,9 @@ class GPT(nn.Module):
         # in addition to the next token, we predict
         # `num_future_targets` of future token.
         # Setting this value to zero keeps the original behavior
+        # (R. Scheibler)
         self.num_future_targets = config.num_future_targets
+        n_targets = 1 + self.num_future_targets
 
         self.transformer = nn.ModuleDict(
             dict(
@@ -218,7 +235,7 @@ class GPT(nn.Module):
                 ln_f=LayerNorm(config.n_embd, bias=config.bias),
             )
         )
-        n_targets = 1 + self.num_future_targets
+
         self.lm_head = nn.Linear(
             config.n_embd, config.vocab_size * n_targets, bias=False
         )
@@ -230,20 +247,10 @@ class GPT(nn.Module):
             self.lm_head.weight
         )  # https://paperswithcode.com/method/weight-tying
 
-        # inter-loss and self-conditioning
+        # inter-loss and self-conditioning (R. Scheibler)
         self.inter_weights = str_to_inter_weights(config.inter_weights)
         self.selfcond = config.selfcond
         self.selfcond_per_layer = config.selfcond_per_layer
-
-        if len(config.ica_layers) > 0:
-            ica_blocks = {}
-            for i in config.ica_layers:
-                ica_blocks[str(i)] = FeatureICA(
-                    num_groups=2, num_iter=5, mask_floor=1e-5, q=1.0, eps=1e-3
-                )
-            self.ica_blocks = nn.ModuleDict(ica_blocks)
-        else:
-            self.ica_blocks = None
 
         # self-conditioning (robin scheibler)
         if self.selfcond:
@@ -371,9 +378,6 @@ class GPT(nn.Module):
         x_prev = None  # keep track of embeddings at previous layer
 
         for bidx in range(self.config.n_layer):
-            if self.ica_blocks is not None and str(bidx) in self.ica_blocks:
-                x = self.ica_blocks[str(bidx)](x)
-
             block = self.transformer.h[bidx]
             x = block(x)
 
