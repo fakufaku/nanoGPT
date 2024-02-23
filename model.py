@@ -17,6 +17,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 from tqdm import tqdm
 from ica import FeatureICA
+from convnorm import ConvNorm
 
 
 def str_to_inter_weights(s):
@@ -49,98 +50,6 @@ class LayerNorm(nn.Module):
 
     def forward(self, input):
         return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
-
-
-class ConvNorm_0(nn.Module):
-    """Convolutional Normalization
-
-    A kind of Norm that normalizes based on local energy rather than just a single feature
-
-    1) The per-feature instantaneous energy is calculated
-    2) The energy is smoothed with a filter whose weights are positive, summing to one
-    3) The smoothed energy is averaged across all features
-    4) The feature vectors are normalized by the square root of the average local energy
-    """
-
-    def __init__(self, ndim, bias, kernel=11):
-        super().__init__()
-        self.kernel = kernel
-        self.weights = nn.Parameter(torch.ones(ndim, 1, kernel))
-        self.bias = nn.Parameter(torch.zeros(ndim)) if bias else None
-
-    def forward(self, input):
-        input = input.transpose(1, 2) # (b, t, c) -> (b, c, t)
-
-        # make the convolution weights sum to one
-        weights = torch.softmax(self.weights, dim=-1)
-
-        # local energy
-        energy = input**2  # (b, t, c)
-        energy = F.pad(energy, (self.kernel - 1, 0))
-        smooth_energy = F.conv1d(energy, weights, groups=input.shape[1])
-        rms = torch.sqrt(smooth_energy.mean(dim=-1, keepdim=True) + 1e-5)
-
-        input = input / (rms + 1e-5)
-
-        input = input.transpose(1, 2) # (b, c, t) -> (b, t, c)
-
-        if self.bias is not None:
-            input = input + self.bias
-
-        return input
-
-class ConvNorm(nn.Module):
-    """Convolutional Normalization
-
-    A kind of Norm that normalizes based on local rather than instantaneous
-    statistics
-    """
-
-    def __init__(self, ndim, bias, weights=False, kernel=11, shared_filter=False):
-        super().__init__()
-        self.kernel = kernel
-        self.shared_filter = shared_filter
-        if shared_filter:
-            self.weights_mean = nn.Parameter(torch.zeros(1, 1, kernel))
-            self.weights_var = nn.Parameter(torch.zeros(1, 1, kernel))
-        else:
-            self.weights_mean = nn.Parameter(torch.zeros(1, ndim, kernel))
-            self.weights_var = nn.Parameter(torch.zeros(1, ndim, kernel))
-        self.bias = nn.Parameter(torch.zeros(ndim)) if bias else None
-        self.gamma = nn.Parameter(torch.ones(ndim))
-
-    def forward(self, input):
-        input = input.transpose(1, 2) # (b, t, c) -> (b, c, t)
-
-        # make the convolution weights sum to one
-        weights_mean = torch.softmax(self.weights_mean.flatten(), dim=0)
-        weights_mean = weights_mean.reshape(self.weights_mean.shape)
-        weights_var = torch.softmax(self.weights_var.flatten(), dim=0)
-        weights_var = weights_var.reshape(self.weights_var.shape)
-
-        # local mean
-        input_pad = F.pad(input, (self.kernel - 1, 0), mode="replicate")
-        if self.shared_filter:
-            input_pad = input_pad.mean(dim=1, keepdim=True)
-        mean = F.conv1d(input_pad, weights_mean)
-
-        # local variance
-        sq_dev = (input - mean) ** 2
-        if self.shared_filter:
-          sq_dev = sq_dev.mean(dim=1, keepdim=True)
-        sq_dev_pad = F.pad(sq_dev, (self.kernel - 1, 0), mode="replicate")
-        var = F.conv1d(sq_dev_pad, weights_var) # (b, t, c)
-        
-        # normalize
-        input = (input - mean) / (var + 1e-5).sqrt()
-
-        input = input.transpose(1, 2) # (b, c, t) -> (b, t, c)
-
-        input = input * self.gamma
-        if self.bias is not None:
-            input = input + self.bias
-
-        return input
 
 
 class CausalSelfAttention(nn.Module):
@@ -283,7 +192,9 @@ class GPTConfig:
     ica_layers: Tuple[int] = ()  # layers to apply ICA to
     use_conv_norm: bool = False  # use convolutional normalization instead of layer norm
     conv_norm_kernel: int = 11  # kernel size to use for convolutional normalization
-    conv_norm_shared_filter: bool = False  # share the weights across all feature dimensions
+    conv_norm_shared_filter: bool = (
+        False  # share the weights across all feature dimensions
+    )
 
 
 class GPT(nn.Module):
