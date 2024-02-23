@@ -1,8 +1,6 @@
 """
-Prepare the Shakespeare dataset for character-level language modeling.
-So instead of encoding with GPT-2 BPE tokens, we just map characters to ints.
-Will save train.bin, val.bin containing the ids, and meta.pkl containing the
-encoder and decoder and some other related info.
+Prepare the enwik8 dataset for character-level language modeling.
+So instead of encoding with GPT-2 BPE tokens, we just map bytes to ints.
 """
 import io
 import os
@@ -82,9 +80,9 @@ meta = {
 with open(os.path.join(os.path.dirname(__file__), "meta.pkl"), "wb") as f:
     pickle.dump(meta, f)
 
-# length of dataset in characters:  1115394
-# all the unique characters:
-#  !$&',-.3:;?ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz
-# vocab size: 65
-# train has 1003854 tokens
-# val has 111540 tokens
+# length of dataset in bytes: 100,000,000
+# vocab size: 205
+# <mediawiki xmlns="http://www.mediawiki.org/xml/export-0.3/" xmlns:xsi="http://www.w3.org/2001/XMLSch
+# train has 90,000,000 tokens
+# val has 5,000,000 tokens
+# test has 5,000,000 tokens

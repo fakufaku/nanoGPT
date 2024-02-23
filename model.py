@@ -157,32 +157,29 @@ class MLP(nn.Module):
         return x
 
 
+def get_norm_module(config):
+    """
+    Helper function to choose the type of norm (R. Scheibler)
+    """
+    if config.use_conv_norm:
+        # optional use of the convolutional normalization (R. Scheibler)
+        return ConvNorm(
+            config.n_embd,
+            bias=config.bias,
+            kernel=config.conv_norm_kernel,
+            shared_filter=config.conv_norm_shared_filter,
+        )
+    else:
+        return LayerNorm(config.n_embd, bias=config.bias)
+
+
 class Block(nn.Module):
     def __init__(self, config):
         super().__init__()
-        if config.use_conv_norm:
-            # optional use of the convolutional normalization (R. Scheibler)
-            self.ln_1 = ConvNorm(
-                config.n_embd,
-                bias=config.bias,
-                kernel=config.conv_norm_kernel,
-                shared_filter=config.conv_norm_shared_filter,
-            )
-        else:
-            self.ln_1 = LayerNorm(config.n_embd, bias=config.bias)
-
+        # modified to choose the norm module according to config (R. Scheibler)
+        self.ln_1 = get_norm_module(config)
         self.attn = CausalSelfAttention(config)
-
-        if config.use_conv_norm:
-            # optional use of the convolutional normalization (R. Scheibler)
-            self.ln_2 = ConvNorm(
-                config.n_embd,
-                bias=config.bias,
-                kernel=config.conv_norm_kernel,
-                shared_filter=config.conv_norm_shared_filter,
-            )
-        else:
-            self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
+        self.ln_2 = get_norm_module(config)
         self.mlp = MLP(config)
 
     def forward(self, x):
@@ -381,6 +378,7 @@ class GPT(nn.Module):
             block = self.transformer.h[bidx]
             x = block(x)
 
+            # optional inter-layer loss (R. Scheibler)
             if bidx in self.inter_weights:
                 int_logits, int_loss = self._loss(x, targets)
 
@@ -391,6 +389,7 @@ class GPT(nn.Module):
                     pred = torch.softmax(int_logits, dim=-1).detach()
                     x = x + self.selfcond_head[str(bidx)](pred)
 
+            # optional embedding prediction loss (R. Scheibler)
             if self.selfpred:
                 if bidx in self.selfpred_weights:
                     if x_prev is None:
@@ -411,6 +410,7 @@ class GPT(nn.Module):
 
         if loss is not None:
             if self.training:
+                # add the inter-layer losses, but only during training (R. Scheibler)
                 if len(inter_loss) == 0:
                     inter_loss = [0.0]
                 main_weight = 1.0 - sum(self.inter_weights.values())
@@ -419,7 +419,7 @@ class GPT(nn.Module):
                 # add self-prediction loss
                 loss = loss + selfpred_loss
 
-        # we remove extra predicted tokens at the end, if any
+        # we remove extra predicted tokens at the end, if any (R. Scheibler)
         logits = logits[..., : self.config.vocab_size]
 
         return logits, loss

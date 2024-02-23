@@ -6,11 +6,18 @@ import torch.nn.functional as F
 class ConvNorm(nn.Module):
     """Convolutional Normalization
 
-    A kind of Norm that normalizes based on local rather than instantaneous
-    statistics
+    A Norm that normalizes based on local rather than instantaneous statistics.
+
+    Added by R. Scheibler
+
+    Args:
+        ndim (int): number of input channels
+        bias (bool): whether to include a bias term
+        kernel (int): size of the convolutional kernel
+        shared_filter (bool): whether to use the same filter for all channels
     """
 
-    def __init__(self, ndim, bias, weights=False, kernel=11, shared_filter=False):
+    def __init__(self, ndim, bias, kernel=11, shared_filter=False):
         super().__init__()
         self.kernel = kernel
         self.shared_filter = shared_filter
@@ -24,6 +31,11 @@ class ConvNorm(nn.Module):
         self.gamma = nn.Parameter(torch.ones(ndim))
 
     def forward(self, input):
+        """Forward pass
+
+        Args:
+            input (torch.Tensor): input tensor of shape (batch, time, channels)
+        """
         input = input.transpose(1, 2)  # (b, t, c) -> (b, c, t)
 
         # make the convolution weights sum to one

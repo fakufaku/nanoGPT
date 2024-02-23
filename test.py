@@ -1,5 +1,5 @@
 """
-Sample from a trained model
+Tests a trained model
 """
 import json
 import math
