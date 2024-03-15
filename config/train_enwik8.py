@@ -40,7 +40,6 @@ selfpred_weights = ""
 selfcond = False
 selfcond_per_layer = False
 num_future_targets = 0
-ica_layers = ()
 use_conv_norm = False
 conv_norm_kernel = 11
 conv_norm_shared_filter = False
